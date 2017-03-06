@@ -1,0 +1,297 @@
+---
+title: "Polycomb Complex Gene Expressions"
+author: "Paul Essers"
+output: html_document
+---
+This document was compiled at `r Sys.time()`
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, warning = F, message = F, error = F, fig.height=6,fig.width=12)
+set.seed(1)
+library(knitr)
+
+library(ggplot2)
+
+theme_set(theme_bw())
+theme_update(strip.background = element_blank(),
+             strip.text = element_text(size=12),
+             axis.text = element_text(size=14),
+             #axis.text.x = element_text(angle=45,vjust=0.8,hjust=1),
+             axis.ticks.length = unit(0.1, "cm"),
+             axis.text.x = element_blank(),
+             legend.key = element_rect(fill = "white", color = "white"),
+             panel.grid.major = element_blank(),
+             panel.grid.minor = element_blank(),
+             panel.border = element_rect(colour = "white"),
+             panel.background = element_blank(),
+             axis.line.x = element_line(colour = "black"),
+             axis.line.y = element_line(colour = "black"))
+
+median.quartile <- function(x){
+  out <- quantile(x, probs = c(0.25,0.5,0.75))
+  names(out) <- c("ymin","y","ymax")
+  return(out) 
+}
+
+pairwise.var.test<-function(values,groups){
+  #message("no p-value adjustments are implemented!")
+  groups<-factor(groups)
+  p.vals<-matrix(nrow=length(levels(groups))-1,ncol=length(levels(groups))-1)
+  colnames(p.vals)<-paste0("col",seq(1,length(levels(groups))-1,1))
+  row.names(p.vals)<-paste0("row",seq(1,length(levels(groups))-1,1))
+  for(i in 1:(length(levels(groups))-1)){
+    for(j in i+1:(length(levels(groups)))){
+      if(j>length(levels(groups))){break}
+      # message(paste0(i,"\t",j))
+      x<-values[which(groups==as.character(levels(groups)[i]))]
+      y<-values[which(groups==as.character(levels(groups)[j]))]
+      p.vals[j-1,i]<-var.test(x,y)$p.value
+      colnames(p.vals)[i]<-as.character(levels(groups)[i])
+      row.names(p.vals)[j-1]<-as.character(levels(groups)[j])
+    }
+    
+  }
+  return(p.vals)
+}
+
+```
+
+# Introduction
+
+Polycomb targets were found to be highly repressed in the sensM group. Check for expression of polycomb complex genes in the different groups.
+
+
+# Define Groups
+
+```{r,fig.width=4,fig.height=4}
+# setwd("Scripts")
+load("../OriginalData/UT-SCC.Rdata")
+
+cutoff.mmc  <-0.25
+cutoff.ola  <-0.30
+phenoDat$Class<-factor(ifelse(phenoDat$MitomycinC<cutoff.mmc & phenoDat$Olaparib<cutoff.ola,"SensitiveMO",
+                       ifelse(phenoDat$MitomycinC>cutoff.mmc & phenoDat$Olaparib>cutoff.ola,"Resistant",
+                       ifelse(phenoDat$MitomycinC<cutoff.mmc & phenoDat$Olaparib>cutoff.ola,"SensitiveM","Undetermined"))))
+
+# remove controls
+phenoDat$Class[phenoDat$cell.lines %in% c("FANCA","FANCG","GM847")]<-"Undetermined"
+# remove ambiguous cell lines
+phenoDat$Class[phenoDat$cell.lines %in% c("UT-SCC-43A","UT-SCC-32","UT-SCC-8")]<-"Undetermined"
+
+colours<-c("green","blue","red","grey")[as.numeric(phenoDat$Class)]
+
+# This is the plot for the paper, with the undetermined cell lines left out:
+colours<-c("darkgreen","blue","red","white")[as.numeric(phenoDat$Class)]
+plot(NULL,ylim=c(0,1),xlim=c(0,1),xlab="mitomycin C",ylab="olaparib",main="UT-SCC lines Drug Sensitivity")
+CL.numbers<-sapply(phenoDat$cell.lines,function(x){strsplit(x,"-",fixed=T)[[1]][3]})
+# two cell lines overlap in the plot, offset them a little for clarity
+offsetvector<-rep(0,nrow(phenoDat))
+offsetvector[phenoDat$cell.lines %in% c("UT-SCC-54C","UT-SCC-15")]<-offsetvector[phenoDat$cell.lines %in% c("UT-SCC-54C","UT-SCC-45")]+c(-0.025,+0.015)
+text(phenoDat$MitomycinC,phenoDat$Olaparib+offsetvector,labels=CL.numbers,cex=0.7,col=colours)
+abline(h=cutoff.ola+0.01);abline(v=cutoff.mmc-0.015) # shift the line a little so it doesn't overlap with text
+
+rm(colours,cutoff.ola,cutoff.mmc,CL.numbers,offsetvector)
+
+phenoDat<-phenoDat[phenoDat$Class!="Undetermined",]
+phenoDat$Class<-factor(phenoDat$Class,levels=c("SensitiveMO","SensitiveM","Resistant"))
+expr.UTSCC<-expr.UTSCC[,phenoDat$cell.lines]
+expr.UTSCC.rpkm<-expr.UTSCC.rpkm[,phenoDat$cell.lines]
+expr.UTSCC.qn<-expr.UTSCC.qn[,phenoDat$cell.lines]
+```
+
+# Expression
+
+## PRC2
+
+```{r}
+# RBP7=RBAP46, RBP4=RBAP48
+# grep("RBP7",gene_info$external_gene_id,value = T)
+prc2<-c("SUZ12","EZH1","EZH2","EED","RBP7","RBP4","JARID2","AEBP2","PHF1","MTF2","PHF19","C17orf96")
+
+prc2<-gene_info[gene_info$external_gene_id %in% prc2,]
+
+expr.prc2<-expr.UTSCC.qn[prc2$ensembl_gene_id,]
+
+library(gplots)
+row.names(expr.prc2)<-prc2$external_gene_id
+hm<-heatmap.2(expr.prc2,main="Cell Lines",density.info="none", trace="none", margins =c(7,7), col=redgreen(75),dendrogram="both",labCol=NULL,scale="row", ColSideColors=as.character(as.numeric(phenoDat$Class)))
+
+prc2.full<-data.frame(phenoDat[,c(2,3,16)], t(expr.prc2))
+library(tidyr)
+prc2.long<-prc2.full[,-c(1,2)] %>% gather(Gene,Expression,MTF2:PHF19)
+
+
+ggplot(data=prc2.long, aes(x=Class, y=Expression, fill=Class)) + 
+  geom_boxplot(position=position_dodge(0.9))+
+  geom_point(position = position_jitter(width = 0.2))+
+  scale_y_continuous(limits=c(0,20))+
+  ylab("expression") +  ggtitle("polycomb repressive complex 2")+ xlab("")+
+  facet_grid(. ~ Gene,scale="free")+
+  scale_fill_manual(values=c("white","lightgrey","darkgrey"))
+  
+```
+
+So it looks like higher expression of EZH2, EED and maybe PHF19 in the sensitiveM group
+
+```{r}
+library(dplyr)
+
+cat("EZH2")
+pairwise.var.test(prc2.full$EZH2,prc2.full$Class)
+pairwise.t.test(prc2.full$EZH2,prc2.full$Class,p.adjust.method = "none",pool.sd=T)
+means<-prc2.full[,c("EZH2","Class")] %>% as.tbl %>% group_by(Class) %>% summarize(av=mean(EZH2,na.rm=T),med=median(EZH2,na.rm=T))
+kable(means)
+
+cat("EED")
+pairwise.var.test(prc2.full$EED,prc2.full$Class)
+pairwise.t.test(prc2.full$EED,prc2.full$Class,p.adjust.method = "none",pool.sd=T)
+means<-prc2.full[,c("EED","Class")] %>% as.tbl %>% group_by(Class) %>% summarize(av=mean(EED,na.rm=T),med=median(EED,na.rm=T))
+kable(means)
+
+cat("PHF19")
+pairwise.var.test(prc2.full$PHF19,prc2.full$Class)
+pairwise.t.test(prc2.full$PHF19,prc2.full$Class,p.adjust.method = "none",pool.sd=T)
+means<-prc2.full[,c("PHF19","Class")] %>% as.tbl %>% group_by(Class) %>% summarize(av=mean(PHF19,na.rm=T),med=median(PHF19,na.rm=T))
+kable(means)
+
+cat("RBP7")
+pairwise.var.test(prc2.full$RBP7,prc2.full$Class)
+pairwise.t.test(prc2.full$RBP7,prc2.full$Class,p.adjust.method = "none",pool.sd=F)
+means<-prc2.full[,c("RBP7","Class")] %>% as.tbl %>% group_by(Class) %>% summarize(av=mean(RBP7,na.rm=T),med=median(RBP7,na.rm=T))
+kable(means)
+
+```
+
+Only PHF19 is marginally significant..
+
+
+
+Does expression of any of these genes correlate to olaparib sensitivity? Overall Or maybe only in the mmc sensitive groups?
+
+```{r}
+cor.test(prc2.full$Olaparib,prc2.full$EZH2,method="spearman")
+cor.test(prc2.full[prc2.full$Class!="Resistant",]$Olaparib,prc2.full[prc2.full$Class!="Resistant",]$EZH2,method="spearman")
+
+cor.test(prc2.full$Olaparib,prc2.full$EED,method="spearman")
+cor.test(prc2.full[prc2.full$Class!="Resistant",]$Olaparib,prc2.full[prc2.full$Class!="Resistant",]$EED,method="spearman")
+
+cor.test(prc2.full$Olaparib,prc2.full$PHF19,method="spearman")
+cor.test(prc2.full[prc2.full$Class!="Resistant",]$Olaparib,prc2.full[prc2.full$Class!="Resistant",]$PHF19,method="spearman")
+```
+
+No, not at all
+
+## PRC1
+
+```{r}
+# RBP7=RBAP46, RBP4=RBAP48
+# grep("RING",gene_info$external_gene_id,value = T)
+prc1.list<-c("RING1","BMI1","PCGF2","CBX2","CBX4","CBX6","CBX7","CBX8","PHC1","PHC2","PHC3","RYBP","KDM2B","PCGF1")
+
+prc1<-gene_info[gene_info$external_gene_id %in% prc1.list,]
+
+prc1.list[which(!(prc1.list %in% prc1$external_gene_id))]
+
+expr.prc1<-expr.UTSCC.qn[prc1$ensembl_gene_id,]
+
+library(gplots)
+row.names(expr.prc1)<-prc1$external_gene_id
+hm<-heatmap.2(expr.prc1,main="Cell Lines",density.info="none", trace="none", margins =c(7,7), col=redgreen(75),dendrogram="both",labCol=NULL,scale="row", ColSideColors=as.character(as.numeric(phenoDat$Class)))
+
+prc1.full<-data.frame(phenoDat[,c(2,3,16)], t(expr.prc1))
+library(tidyr)
+prc1.long<-prc1.full[,-c(1,2)] %>% gather(Gene,Expression,PHC2:RING1)
+
+
+ggplot(data=prc1.long, aes(x=Class, y=Expression, fill=Class)) + 
+  geom_boxplot(position=position_dodge(0.9))+
+  geom_point(position = position_jitter(width = 0.2))+
+  scale_y_continuous(limits=c(0,20))+
+  ylab("expression") +  ggtitle("polycomb repressive complex 1")+ xlab("")+
+  facet_grid(. ~ Gene,scale="free")+
+  scale_fill_manual(values=c("white","lightgrey","darkgrey"))
+  
+```
+
+Doesn't look like there are any differences between the classes
+
+## Regulated TFs etc
+
+```{r}
+# grep("ITG",gene_info$external_gene_id,value = T)
+gene.list<-c("ERBB2","SNAI1","KAT2A","MYC","KLF4","ETS1","ETS2","SYK","PARP1")
+
+gene<-gene_info[gene_info$external_gene_id %in% gene.list,]
+
+gene.list[which(!(gene.list %in% gene$external_gene_id))]
+
+expr.gene<-expr.UTSCC.qn[gene$ensembl_gene_id,]
+
+library(gplots)
+row.names(expr.gene)<-gene$external_gene_id
+hm<-heatmap.2(expr.gene,main="Cell Lines",density.info="none", trace="none", margins =c(7,7), col=redgreen(75),dendrogram="both",labCol=NULL,scale="row", ColSideColors=as.character(as.numeric(phenoDat$Class)))
+
+gene.full<-data.frame(phenoDat[,c(2,3,16)], t(expr.gene))
+library(tidyr)
+gene.long<-gene.full[,-c(1,2)] %>% gather(Gene,Expression,PARP1:SYK)
+
+
+ggplot(data=gene.long, aes(x=Class, y=Expression, fill=Class)) + 
+  geom_boxplot(position=position_dodge(0.9))+
+  geom_point(position = position_jitter(width = 0.2))+
+  #scale_y_continuous(limits=c(0,20))+
+  ylab("expression") +  ggtitle("polycomb repressive complex 1")+ xlab("")+
+  facet_grid(. ~ Gene,scale="free")+
+  scale_fill_manual(values=c("white","lightgrey","darkgrey"))
+```
+
+
+## Integrins
+
+```{r}
+# grep("ITG",gene_info$external_gene_id,value = T)
+gene.list<-grep("ITG",gene_info$external_gene_id,value = T)
+
+gene<-gene_info[gene_info$external_gene_id %in% gene.list,]
+
+gene.list[which(!(gene.list %in% gene$external_gene_id))]
+
+expr.gene<-expr.UTSCC.qn[gene$ensembl_gene_id,]
+
+library(gplots)
+row.names(expr.gene)<-gene$external_gene_id
+hm<-heatmap.2(expr.gene,main="Cell Lines",density.info="none", trace="none", margins =c(7,7), col=redgreen(75),dendrogram="both",labCol=NULL,scale="row", ColSideColors=as.character(as.numeric(phenoDat$Class)))
+```
+
+
+Doesn't look like there are any differences between the classes
+
+
+## PARP / PARG
+
+```{r}
+# grep("PARG",gene_info$external_gene_id,value = T)
+gene.list<-grep("PARG",gene_info$external_gene_id,value = T)
+
+gene<-gene_info[gene_info$external_gene_id %in% gene.list,]
+
+gene.list[which(!(gene.list %in% gene$external_gene_id))]
+
+expr.gene<-expr.UTSCC.qn[gene$ensembl_gene_id,]
+
+library(gplots)
+row.names(expr.gene)<-gene$external_gene_id
+hm<-heatmap.2(expr.gene,main="Cell Lines",density.info="none", trace="none", margins =c(7,7), col=redgreen(75),dendrogram="both",labCol=NULL,scale="row", ColSideColors=as.character(as.numeric(phenoDat$Class)))
+
+boxplot(expr.gene[1,]~phenoDat$Class)
+points(expr.gene[1,]~phenoDat$Class)
+plot(expr.gene[1,]~phenoDat$Olaparib,ylab="PARG",xlab="Olaparib IC50")
+fit<-(lm(expr.gene[1,]~phenoDat$Olaparib))
+abline(fit$coefficients)
+```
+
+
+```{r sessionInfo}
+#sessionInfo()
+devtools::session_info()
+```
